@@ -18,15 +18,24 @@
 #define BUFFER_SIZE 1024
 
 typedef struct Event {
-    int sender_id;
+    int sender_id, recver_id;
     int send_time, rec_time;
 } Event;
 
-typedef struct VectorClock {
-    int sender_id;
-    int rec_time;
+typedef struct REC {
     int vc[NUM_PROC];
-} VClock, Message;
+} REC;
+
+typedef struct SENT {
+	int vc[NUM_PROC][NUM_PROC];
+} SENT;
+
+typedef struct Message {
+    int    sender_id;
+    int    rec_time;
+    struct
+    SENT   sent;
+} Message;
 
 int       proc_id;
 char      *proc_ip;
@@ -36,8 +45,8 @@ int       start_client_socket(const int port, const char *ip);
 void      *server(void *arg);
 void      *client(void *arg);
 
-char      config_filename[] = "./data/broadcast.conf";
-char      logs_filename[]   = "./data/broadcast.log";
+char      config_filename[] = "./data/unicast.conf";
+char      logs_filename[]   = "./data/unicast.log";
 FILE      *ifp, *ofp;
 
 int       **delay;
@@ -51,7 +60,10 @@ int       ticks;
 int       num_event = 0;
 Event     events[NUM_EVENT];
 
-VClock    vclock;
+struct
+REC       rec;
+struct
+SENT      sent;
 
 void signal_callback_handler(int signum) {
     printf("p%d catches signal %d\n", proc_id, signum);
@@ -61,7 +73,7 @@ void signal_callback_handler(int signum) {
 
 int main (int argc, char *argv[]) { // id, ip
     if (argc != 3) {
-        fprintf(stderr, "Argment error: broadcast proc_id proc_ip\n");
+        fprintf(stderr, "Argment error: unicast proc_id proc_ip\n");
         return 1;
     }
     proc_id = atoi(argv[1]);
@@ -94,14 +106,16 @@ int main (int argc, char *argv[]) { // id, ip
 
     char  instruction[20]; // ignore "bc at" here
     char  comma;
-    int   sender_id, event_time;
-    while (fscanf(ifp, "%d%s%s", &sender_id, instruction, instruction) != EOF) {
+    int   sender_id, recver_id, event_time;
+    while (fscanf(ifp, "%d%s%s%d%s", &sender_id, instruction, instruction, &recver_id, instruction) != EOF) {
         events[num_event].sender_id = sender_id;
+        events[num_event].recver_id = recver_id;
         fscanf(ifp, "%d%c", &event_time, &comma);
         events[num_event++].send_time = event_time;
         while (comma == ',') {
             fscanf(ifp, "%d%c", &event_time, &comma);
             events[num_event].sender_id = sender_id;
+            events[num_event].recver_id = recver_id;
             events[num_event++].send_time = event_time;
         }
     }
@@ -114,8 +128,8 @@ int main (int argc, char *argv[]) { // id, ip
     ticks = difftime(start_time, current_time);
     fprintf(ofp, "%3d\t p%d\t SRT\t   NULL\n", ticks, proc_id);
     fclose(ofp);
-    memset(vclock.vc, 0, sizeof(vclock.vc));
-    vclock.sender_id = proc_id;
+    memset(sent.vc, 0, sizeof(sent.vc));
+    memset(rec.vc, 0, sizeof(rec.vc));
 
     nanodelay.tv_sec = 0; nanodelay.tv_nsec = 1e8;
 
@@ -192,12 +206,12 @@ void* server(void *arg) {
         return NULL;
     }
     
-    int       connfd = *(int*) arg;
+    int     connfd = *(int*) arg;
 
-    VClock    recv_buff[BUFFER_SIZE];
-    int       buff_num = 0;
-    Message   mes;
-    int       i, j, delay_next, flag;
+    Message recv_buff[BUFFER_SIZE];
+    int     buff_num = 0;
+    Message mes;
+    int     i, j, k, delay_next, flag, no;
 
     if(fcntl(connfd, F_GETFL) & O_NONBLOCK)
         fprintf(stderr, "p%d is in non-blocking mode\n", proc_id);
@@ -209,9 +223,8 @@ void* server(void *arg) {
 
     while (1) {
         if (recv(connfd, &mes, 1024, 0) > 0) {
-            fprintf(stderr, "p%d receives a message from %d at %d whose rec_time=%d; mes vc=[", proc_id, mes.sender_id, ticks, mes.rec_time);
-            for (i = 0; i < NUM_PROC; i++) fprintf(stderr, "%d%c", mes.vc[i], i==NUM_PROC-1?']':' '); fprintf(stderr, "; local vc=[");
-            for (i = 0; i < NUM_PROC; i++) fprintf(stderr, "%d%c", vclock.vc[i], i==NUM_PROC-1?']':' '); fprintf(stderr, "\n");
+            fprintf(stderr, "p%d receives a message from %d at %d whose rec_time=%d; rec vc=[", proc_id, mes.sender_id, ticks, mes.rec_time);
+            for (i = 0; i < NUM_PROC; i++) fprintf(stderr, "%d%c", rec.vc[i], i==NUM_PROC-1?']':' '); fprintf(stderr, "\n");
             recv_buff[buff_num++] = mes;
             nanosleep(&nanodelay, &tim);
         }
@@ -219,7 +232,9 @@ void* server(void *arg) {
         for (i = 0; i < buff_num; i++)
             if (recv_buff[i].rec_time <= (int)ticks && recv_buff[i].rec_time >= 0) {
                 fprintf(stderr, "p%d receives a message from %d at %d\n", proc_id, recv_buff[i].sender_id, ticks);
-                fprintf(ofp, "%3d\t p%d\t REC\t   %d:%d\n", ticks, proc_id, recv_buff[i].sender_id, recv_buff[i].vc[recv_buff[i].sender_id]);
+                no = 0;
+	 	        for (k = 0; k < NUM_PROC; k++) no += mes.sent.vc[mes.sender_id][k];
+                fprintf(ofp, "%3d\t p%d\t REC\t   %d:%d\n", ticks, proc_id, recv_buff[i].sender_id, no);
                 fflush(ofp);
                 recv_buff[i].rec_time = -1;
             }
@@ -229,17 +244,22 @@ void* server(void *arg) {
             delay_next = 0;
             for (i = 0; i < buff_num; i++) {
                 mes = recv_buff[i];
-                if (mes.rec_time < 0 && vclock.vc[mes.sender_id] == mes.vc[mes.sender_id]-1) {
+                if (mes.rec_time < 0 && rec.vc[mes.sender_id] == mes.sent.vc[mes.sender_id][proc_id]-1) {
                     delay_next = 1;
                     flag = 0;
                     for (j = 0; j < NUM_PROC; j++)
-                        if (j != mes.sender_id && vclock.vc[j] < mes.vc[j]) flag = 1;
+                        if (j != mes.sender_id && rec.vc[j] < mes.sent.vc[j][proc_id]) flag = 1;
                     if (!flag) {
                         fprintf(stderr, "p%d delivers a message from %d at %d\n", proc_id, mes.sender_id, ticks);
-                        fprintf(ofp, "%3d\t p%d\t DLR\t   %d:%d\n", ticks, proc_id, mes.sender_id, mes.vc[mes.sender_id]);
+                        no = 0;
+	 	           		for (k = 0; k < NUM_PROC; k++) no += mes.sent.vc[mes.sender_id][k];
+                        fprintf(ofp, "%3d\t p%d\t DLR\t   %d:%d\n", ticks, proc_id, mes.sender_id, no);
                         fflush(ofp);
                         recv_buff[i].rec_time = INT_MAX;
-                        vclock.vc[mes.sender_id] = mes.vc[mes.sender_id];
+                        rec.vc[mes.sender_id]++;
+                        for (j = 0; j < NUM_PROC; j++)
+                        	for (k = 0; k < NUM_PROC; k++)
+                        		if (mes.sent.vc[j][k] > sent.vc[j][k]) sent.vc[j][k] = mes.sent.vc[j][k];
                     }
                 }
             }
@@ -262,12 +282,14 @@ void* client(void *arg) {
 
     sleep(2); // wait for server
  
-    int clnt_sockfd[NUM_PROC];
-    int i, j, k;
+    int     clnt_sockfd[NUM_PROC];
+    Message mes;
+    int     i, j, k, no;
     for (i = 0; i < NUM_PROC; i++) {
         if (i != proc_id) clnt_sockfd[i] = start_client_socket(i, proc_ip);
         sleep(1);
     }
+    mes.sender_id = proc_id;
     sleep(5);
     fprintf(stderr, "p%d finishes configuration\n", proc_id);
     time(&start_time); // retime
@@ -277,16 +299,17 @@ void* client(void *arg) {
         ticks = difftime(current_time, start_time);
         for (j = 0; j < num_event; j++)
             if (events[j].sender_id == proc_id && events[j].send_time == (int)ticks) {
-                vclock.vc[proc_id]++;     // update local Vector Clock
-                for (i = 0; i < NUM_PROC; i++)
-                    if (i != proc_id) {
-                        vclock.rec_time = events[j].send_time + delay[proc_id][i];
-                        fprintf(stderr, "p%d sends message to p%d at %d with rec_time=%d; mes vc=[", proc_id, i, ticks, vclock.rec_time);
-                        for (k = 0; k < NUM_PROC; k++) fprintf(stderr, "%d%c", vclock.vc[k], k==NUM_PROC-1?']':' '); fprintf(stderr, "\n");
-                        fprintf(ofp, "%3d\t p%d\t SED\t   %d:%d\n", ticks, proc_id, proc_id, vclock.vc[proc_id]);
-                        fflush(ofp);
-                        send(clnt_sockfd[i], &vclock, sizeof(vclock), 0);
-                    }
+                i = events[j].recver_id;
+                sent.vc[proc_id][i]++;     // update local Vector Clock
+                mes.sent = sent;
+                mes.rec_time = events[j].send_time + delay[proc_id][i];
+                fprintf(stderr, "p%d sends message to p%d at %d with rec_time=%d; rec vc=[", proc_id, i, ticks, mes.rec_time);
+                for (k = 0; k < NUM_PROC; k++) fprintf(stderr, "%d%c", rec.vc[k], k==NUM_PROC-1?']':' '); fprintf(stderr, "\n");
+                no = 0;
+            	for (k = 0; k < NUM_PROC; k++) no += sent.vc[proc_id][k];
+                fprintf(ofp, "%3d\t p%d\t SED\t   %d:%d\n", ticks, proc_id, proc_id, no);
+                fflush(ofp);
+                send(clnt_sockfd[i], &mes, sizeof(mes), 0);
                 events[j].send_time = -1; // message sent
             }
 

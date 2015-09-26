@@ -1,4 +1,4 @@
-TARGET   = broadcast
+TARGET   = unicast
 
 CC       = gcc
 CFLAGS   = -std=gnu99 -g -Wall -I.

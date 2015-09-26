@@ -1,14 +1,14 @@
 #!bin/bash
 
 LOGDIR="./data"
-LOGFILE="$LOGDIR/broadcast.log"
+LOGFILE="$LOGDIR/unicast.log"
 PROC_NUM=5
 PROC_IP="127.0.0.1"
 echo -e "PROCESS INFORMATION\n" > $LOGFILE
 
 for (( i = 0; i < $PROC_NUM; i++ ))
 do
-    ./bin/broadcast $i $PROC_IP &
+    ./bin/unicast $i $PROC_IP &
     pid[$i]=$!
     echo "- Process ($i): ${pid[$i]}" >> $LOGFILE
 done
