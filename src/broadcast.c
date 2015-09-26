@@ -41,8 +41,10 @@ char      logs_filename[]   = "./data/broadcast.log";
 FILE      *ifp, *ofp;
 
 int       **delay;
-struct timespec nanodelay, tim;
+struct
+timespec  nanodelay, tim;
 
+int       serv_listenfd;
 pthread_t serv_tid, clnt_tid;
 time_t    start_time, current_time;
 int       ticks;
@@ -51,6 +53,12 @@ Event     events[NUM_EVENT];
 
 VClock    vclock;
 
+void signal_callback_handler(int signum) {
+    printf("p%d catches signal %d\n", proc_id, signum);
+    close(serv_listenfd);
+    exit(signum);
+}
+
 int main (int argc, char *argv[]) { // id, ip
     if (argc != 3) {
         fprintf(stderr, "Argment error: broadcast proc_id proc_ip\n");
@@ -58,6 +66,9 @@ int main (int argc, char *argv[]) { // id, ip
     }
     proc_id = atoi(argv[1]);
     proc_ip = argv[2];
+
+    // register signal and signal handler
+    signal(SIGINT, signal_callback_handler);
 
     // open file I/O
     ifp = fopen(config_filename, "r");
@@ -108,6 +119,9 @@ int main (int argc, char *argv[]) { // id, ip
 
     nanodelay.tv_sec = 0; nanodelay.tv_nsec = 1e8;
 
+    // start server
+    serv_listenfd = start_server_socket(proc_ip);
+
     // start client
     int err = pthread_create(&clnt_tid, NULL, &client, NULL);
     if (err) {
@@ -116,8 +130,7 @@ int main (int argc, char *argv[]) { // id, ip
     }
     fprintf(stderr, "Server %d starts\n", proc_id);
 
-    // start server
-    int       serv_listenfd = start_server_socket(proc_ip);
+    // build connection
     int       connfd;
     struct    sockaddr_storage serv_storage;
     socklen_t serv_addr_size = sizeof(serv_storage);
@@ -126,9 +139,10 @@ int main (int argc, char *argv[]) { // id, ip
         fprintf(stderr, "p%d builds a new connection\n", proc_id);
         err = pthread_create(&serv_tid, NULL, &server, (void*) &connfd);
         if (err) {
-        fprintf(stderr, "Server thread created failed\n");
-        return 1;
+            fprintf(stderr, "Server thread created failed\n");
+            return 1;
         }
+        nanosleep(&nanodelay, &tim);
     }
 
     pthread_join(clnt_tid, NULL);
@@ -159,14 +173,14 @@ int start_client_socket(const int port, const char *ip) {
     int sockfd = 0;
     struct sockaddr_in serv_addr;
 
-    sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    sockfd = socket(PF_INET, SOCK_STREAM, 0);
 
     serv_addr.sin_family = AF_INET;
     serv_addr.sin_port = htons(BASE_PORT+port);
     serv_addr.sin_addr.s_addr = inet_addr(ip);
     memset(serv_addr.sin_zero, '\0', sizeof(serv_addr.sin_zero));
 
-    connect(sockfd, (struct sockaddr*) &serv_addr, sizeof(serv_addr));
+    while ((connect(sockfd, (struct sockaddr*) &serv_addr, sizeof(serv_addr))) != 0);
 
     return sockfd;
 }
@@ -249,9 +263,13 @@ void* client(void *arg) {
     sleep(2); // wait for server
  
     int clnt_sockfd[NUM_PROC];
-    int i, j;
-    for (i = 0; i < NUM_PROC; i++)
+    int i, j, k;
+    for (i = 0; i < NUM_PROC; i++) {
         if (i != proc_id) clnt_sockfd[i] = start_client_socket(i, proc_ip);
+        sleep(1);
+    }
+    sleep(5);
+    fprintf(stderr, "p%d finishes configuration\n", proc_id);
     time(&start_time); // retime
 
     while (1) {
@@ -262,10 +280,11 @@ void* client(void *arg) {
                 vclock.vc[proc_id]++;     // update local Vector Clock
                 for (i = 0; i < NUM_PROC; i++)
                     if (i != proc_id) {
-                        fprintf(stderr, "p%d sends message to p%d at %d\n", proc_id, i, ticks);
-                        fprintf(ofp, "%3d\t p%d\t SED\t   NULL\n", ticks, proc_id);
-                        fflush(ofp);
                         vclock.rec_time = events[j].send_time + delay[proc_id][i];
+                        fprintf(stderr, "p%d sends message to p%d at %d with rec_time=%d; mes vc=[", proc_id, i, ticks, vclock.rec_time);
+                        for (k = 0; k < NUM_PROC; k++) fprintf(stderr, "%d%c", vclock.vc[k], k==NUM_PROC-1?']':' '); fprintf(stderr, "\n");
+                        fprintf(ofp, "%3d\t p%d\t SED\t   %d:%d\n", ticks, proc_id, proc_id, vclock.vc[proc_id]);
+                        fflush(ofp);
                         send(clnt_sockfd[i], &vclock, sizeof(vclock), 0);
                     }
                 events[j].send_time = -1; // message sent

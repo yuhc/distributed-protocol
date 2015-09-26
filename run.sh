@@ -13,6 +13,11 @@ do
     echo "- Process ($i): ${pid[$i]}" >> $LOGFILE
 done
 
-echo -e "\nBROADCAST LOG\n" >> $LOGFILE
-echo -e "TIME\tPROC\tEVENT\tMESSAGE ID" >> $LOGFILE
+echo -e "\nBROADCAST LOG\nTIME\tPROC\tEVENT\tMESSAGE ID" >> $LOGFILE
 
+sleep 30
+for (( i = 0; i < $PROC_NUM; i++ ))
+do
+    kill -9 ${pid[$i]}
+    echo "Process $i is killed"
+done
