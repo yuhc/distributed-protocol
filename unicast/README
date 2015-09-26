@@ -1,6 +1,38 @@
-Causal Broadcast Protocol Demo
-==
+# Causal Unicast Protocol Demo
 
-Protocol
---------
+## How to run demo
+```bash
+$ make clean && make
+$ bash run.sh
+```
 
+Some output will be displayed in terminal. Formatted log is stored in
+`data/unicast.log`.
+
+## Configuration
+Configuration file is stored in `data/unicast.conf`. The format is
+similar to the UNICAST_EXAMPLE.
+
+## Makefile
+* Compile `$ make`
+* Clean obj `$ make clean`
+* Clean all `$ make remove`
+
+## Run shell
+* `$ bash run.sh`
+
+The script automatically creates five processes. Each process is
+assigned id from 0 to 4, and port from 9000 to 9001. The IP addresses
+are all "127.0.0.1" (the localhost).
+
+The processes will be killed after 30 seconds (it can be modified in
+`run.sh`).
+
+As Linux kernel does not support to close socket in terminal line, and
+the processes are killed by SIGKILL, please make sure that the interval
+of each two executions is at least 1 minute.
+
+## Run exec
+* `$ bin/unicast PROC_ID PROC_ID`
+
+The server needs 10 seconds to set up and finish the configuration (most time is spent on waiting other severs to set up).
