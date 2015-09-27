@@ -191,7 +191,7 @@ void* server(void *arg) {
         fprintf(stderr, "Server p%d can't write in log file %s!\n", proc_id, logs_filename);
         return NULL;
     }
-    
+
     int       connfd = *(int*) arg;
 
     VClock    recv_buff[BUFFER_SIZE];
@@ -229,7 +229,7 @@ void* server(void *arg) {
             delay_next = 0;
             for (i = 0; i < buff_num; i++) {
                 mes = recv_buff[i];
-                if (mes.rec_time < 0 && vclock.vc[mes.sender_id] == mes.vc[mes.sender_id]-1) {
+                if (mes.rec_time < 0 && (vclock.vc[mes.sender_id] == mes.vc[mes.sender_id]-1 || mes.sender_id == proc_id)) {
                     delay_next = 1;
                     flag = 0;
                     for (j = 0; j < NUM_PROC; j++)
@@ -265,7 +265,7 @@ void* client(void *arg) {
     int clnt_sockfd[NUM_PROC];
     int i, j, k;
     for (i = 0; i < NUM_PROC; i++) {
-        if (i != proc_id) clnt_sockfd[i] = start_client_socket(i, proc_ip);
+        /*if (i != proc_id)*/ clnt_sockfd[i] = start_client_socket(i, proc_ip);
         sleep(1);
     }
     sleep(5);
@@ -278,12 +278,15 @@ void* client(void *arg) {
         for (j = 0; j < num_event; j++)
             if (events[j].sender_id == proc_id && events[j].send_time == (int)ticks) {
                 vclock.vc[proc_id]++;     // update local Vector Clock
+                fprintf(stderr, "p%d broadcasts message at %d with rec_time=%d; mes vc=[", proc_id, ticks, vclock.rec_time);
+                for (k = 0; k < NUM_PROC; k++) fprintf(stderr, "%d%c", vclock.vc[k], k==NUM_PROC-1?']':' '); fprintf(stderr, "\n");
+                fprintf(ofp, "%3d\t p%d\t BRC\t   %d:%d\n", ticks, proc_id, proc_id, vclock.vc[proc_id]);
                 for (i = 0; i < NUM_PROC; i++)
-                    if (i != proc_id) {
+                    /*  if (i != proc_id) */{
                         vclock.rec_time = events[j].send_time + delay[proc_id][i];
-                        fprintf(stderr, "p%d sends message to p%d at %d with rec_time=%d; mes vc=[", proc_id, i, ticks, vclock.rec_time);
+                        fprintf(stderr, "> p%d sends message to p%d at %d with rec_time=%d; mes vc=[", proc_id, i, ticks, vclock.rec_time);
                         for (k = 0; k < NUM_PROC; k++) fprintf(stderr, "%d%c", vclock.vc[k], k==NUM_PROC-1?']':' '); fprintf(stderr, "\n");
-                        fprintf(ofp, "%3d\t p%d\t SED\t   %d:%d\n", ticks, proc_id, proc_id, vclock.vc[proc_id]);
+                        //fprintf(ofp, "%3d\t p%d\t SED\t   %d:%d\n", ticks, proc_id, proc_id, vclock.vc[proc_id]);
                         fflush(ofp);
                         send(clnt_sockfd[i], &vclock, sizeof(vclock), 0);
                     }
