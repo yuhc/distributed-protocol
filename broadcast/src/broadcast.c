@@ -230,11 +230,11 @@ void* server(void *arg) {
             for (i = 0; i < buff_num; i++) {
                 mes = recv_buff[i];
                 if (mes.rec_time < 0 && (vclock.vc[mes.sender_id] == mes.vc[mes.sender_id]-1 || mes.sender_id == proc_id)) {
-                    delay_next = 1;
                     flag = 0;
                     for (j = 0; j < NUM_PROC; j++)
                         if (j != mes.sender_id && vclock.vc[j] < mes.vc[j]) flag = 1;
                     if (!flag) {
+                        delay_next = 1;
                         fprintf(stderr, "p%d delivers a message from %d at %d\n", proc_id, mes.sender_id, ticks);
                         fprintf(ofp, "%3d\t p%d\t DLR\t   %d:%d\n", ticks, proc_id, mes.sender_id, mes.vc[mes.sender_id]);
                         fflush(ofp);

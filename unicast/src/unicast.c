@@ -245,11 +245,11 @@ void* server(void *arg) {
             for (i = 0; i < buff_num; i++) {
                 mes = recv_buff[i];
                 if (mes.rec_time < 0 && rec.vc[mes.sender_id] == mes.sent.vc[mes.sender_id][proc_id]-1) {
-                    delay_next = 1;
                     flag = 0;
                     for (j = 0; j < NUM_PROC; j++)
                         if (j != mes.sender_id && rec.vc[j] < mes.sent.vc[j][proc_id]) flag = 1;
                     if (!flag) {
+                        delay_next = 1;
                         fprintf(stderr, "p%d delivers a message from %d at %d\n", proc_id, mes.sender_id, ticks);
                         no = 0;
 	 	           		for (k = 0; k < NUM_PROC; k++) no += mes.sent.vc[mes.sender_id][k];
